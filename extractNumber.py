@@ -12,12 +12,10 @@ NUM_HEIGHT = 20
 N_MIN_ACTIVE_PIXELS = 30
 
 
-def extract_grid(im_number):
+def preprocess_grid(im_number):
     """
-    将校正后图像划分为9x9的棋盘，取出小方格；二值化；去除离中心较远的像素（排除边框干扰）；统计非零像素数（判断方格中是否有数字）
+    二值化；去除离中心较远的像素（排除边框干扰）；统计非零像素数（判断方格中是否有数字）
     :param im_number: 方格图像
-    :param x: 方格横坐标 (0~9)
-    :param y: 方格纵坐标 (0~9)
     :return: im_number_thresh: 二值化及处理后图像
              n_active_pixels: 非零像素数
     """
@@ -67,35 +65,39 @@ def find_biggest_bounding_box(im_number_thresh):
     return [x_b, y_b, w, h]
 
 
-def recognize_number(im_number, x, y):
+def extract_number(im_number):
     """
     判断当前方格是否存在数字并存储该数字
     :param im_number: 方格图像
-    :param x: 方格横坐标 (0~9)
-    :param y: 方格纵坐标 (0~9)
-    :return: 数字的一维数组
+    :return: 是否有数字，数字的一维数组
     """
-    # 提取并处理方格图像
-    [im_number_thresh, n_active_pixels] = extract_grid(im_number)
+    # 预处理方格图像 pre-processing of grid
+    [im_number_thresh, n_active_pixels] = preprocess_grid(im_number)
 
     # 条件1：非零像素大于设定的最小值
+    # the number of active pixels of a grid must > threshold
     if n_active_pixels > N_MIN_ACTIVE_PIXELS:
 
         # 找出外接矩形
+        # find biggest bounding box of the number
         [x_b, y_b, w, h] = find_biggest_bounding_box(im_number_thresh)
 
         # 计算矩形中心与方格中心距离
+        # calculate the distance from the center of the box to the center of the grid.
         cX = x_b + w // 2
         cY = y_b + h // 2
         d = np.sqrt(np.square(cX - GRID_WIDTH // 2) + np.square(cY - GRID_HEIGHT // 2))
 
         # 条件2: 外接矩形中心与方格中心距离足够小
+        # the distance above must < threshold
         if d < GRID_WIDTH // 4:
 
             # 取出方格中数字
+            # extract the number from grid.
             number_roi = im_number[y_b:y_b + h, x_b:x_b + w]
 
             # 扩充数字图像为正方形，边长取长宽较大者
+            # expand number into a square, the side length is the maximum of number's width and height.
             h1, w1 = np.shape(number_roi)
             if h1 > w1:
                 number = np.zeros(shape=(h1, h1))
@@ -105,13 +107,16 @@ def recognize_number(im_number, x, y):
                 number[(w1 - h1) // 2:(w1 - h1) // 2 + h1, :] = number_roi
 
             # 将数字缩放为标准大小
+            # resize the number into standard size
             number = cv2.resize(number, (NUM_WIDTH, NUM_HEIGHT), interpolation=cv2.INTER_LINEAR)
 
             retVal, number = cv2.threshold(number, 50, 255, cv2.THRESH_BINARY)
 
             # 转换为1维数组并返回
+            # reshape it to 1 dimension and return
             return True, number.reshape(1, NUM_WIDTH * NUM_HEIGHT)
 
     # 没有数字，则返回全零1维数组
+    # if there is no number, return zeros in one dimension
     return False, np.zeros(shape=(1, NUM_WIDTH * NUM_HEIGHT))
 

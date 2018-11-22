@@ -3,54 +3,55 @@ import cv2
 import numpy as np
 import plotCVImg
 
-IMAGE_WIDTH = 40
-IMAGE_HEIGHT = 40
+IMAGE_LENGTH = 40
 SUDOKU_SIZE = 9
 N_MIN_ACTIVE_PIXELS = 30
-SIZE_PUZZLE = IMAGE_WIDTH * SUDOKU_SIZE
-DEBUG = 0
+SIZE_PUZZLE = IMAGE_LENGTH * SUDOKU_SIZE
+DEBUG = 1
 
 
 def correct(img_original):
-    # 灰度化
+    # 灰度化 gray image
     img_gray = cv2.cvtColor(img_original, cv2.COLOR_BGR2GRAY)
     if DEBUG:
         plotCVImg.plotImg(img_gray, "gray")
 
-    # 中值滤波
+    # 中值滤波 median blur
     img_blur = cv2.medianBlur(img_gray, 1)
     if DEBUG:
         plotCVImg.plotImg(img_blur, "median Blur")
 
-    # 高斯滤波
+    # 高斯滤波 Gaussian blur
     img_blur = cv2.GaussianBlur(img_blur, (3, 3), 0)
     if DEBUG:
         plotCVImg.plotImg(img_blur, "Gaussian Blur")
 
     # 将每个像素除以闭操作后的像素，可以调整图像亮度
+    # Divide image py the closed image. It can adjust the lightness of the image.
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
     close = cv2.morphologyEx(img_blur, cv2.MORPH_CLOSE, kernel)
     div = np.float32(img_blur) / close
-    img_brightness_adjust = np.uint8(cv2.normalize(div, div, 0, 255, cv2.NORM_MINMAX))
+    img_brightness_adjusted = np.uint8(cv2.normalize(div, div, 0, 255, cv2.NORM_MINMAX))
     if DEBUG:
-        plotCVImg.plotImg(img_brightness_adjust, "brightness adjust")
+        plotCVImg.plotImg(img_brightness_adjusted, "brightness adjust")
 
     # 自适应阈值二值化，注意其返回值只有一个
-    img_thresh = cv2.adaptiveThreshold(img_brightness_adjust, 255,
+    # adaptive threshold
+    img_thresh = cv2.adaptiveThreshold(img_brightness_adjusted, 255,
                                        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                        cv2.THRESH_BINARY_INV, 11, 7)
     if DEBUG:
         img_thresh = cv2.medianBlur(img_thresh, 3)
         plotCVImg.plotImg(img_thresh, "adaptive Threshold")
 
-    # 寻找轮廓
+    # 寻找轮廓 find contours in the image
     binary, contours, hierarchy = cv2.findContours(img_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if DEBUG:
         img_contours = img_original.copy()
         cv2.drawContours(img_contours, contours, -1, (0, 0, 255), 2)
         plotCVImg.plotImg(img_contours, "contours")
 
-    # 找到最大轮廓
+    # 找到最大轮廓 find the biggest contour
     max_area = 0
     biggest_contour = None
     for cnt in contours:
@@ -59,20 +60,23 @@ def correct(img_original):
             max_area = area
             biggest_contour = cnt
 
-    # mask操作
-    mask = np.zeros(img_brightness_adjust.shape, np.uint8)
+    # add mask on image
+    mask = np.zeros(img_brightness_adjusted.shape, np.uint8)
     cv2.drawContours(mask, [biggest_contour], 0, 255, cv2.FILLED)
     cv2.drawContours(mask, [biggest_contour], 0, 0, 2)
-    image_with_mask = cv2.bitwise_and(img_brightness_adjust, mask)
+    image_with_mask = cv2.bitwise_and(img_brightness_adjusted, mask)
     if DEBUG:
         plotCVImg.plotImg(image_with_mask, "image_with_mask")
 
-    # 角点检测
+    # 角点检测 Harris corner detector
     dst = cv2.cornerHarris(image_with_mask, 2, 3, 0.04)
     if DEBUG:
         plotCVImg.plotImg(dst, "image_cornerHarris")
 
-    # x方向Sobel算子，膨胀操作连接断线，边缘检测找出竖线
+    # 水平方向Sobel算子，膨胀操作连接断线，边缘检测找出竖线
+    # Use the Sobel operator in the horizontal direction,
+    # Use dilate to connect the lines,
+    # and find contours which are the vertical lines of the grid.
     dx = cv2.Sobel(image_with_mask, cv2.CV_16S, 1, 0)
     dx = cv2.convertScaleAbs(dx)
     cv2.normalize(dx, dx, 0, 255, cv2.NORM_MINMAX)
@@ -91,7 +95,8 @@ def correct(img_original):
     close = cv2.morphologyEx(close, cv2.MORPH_CLOSE, None, iterations=2)
     closex = close.copy()
 
-    # Y方向，找出横线
+    # 找出横线
+    # find the horizontal lines, same as above
     dy = cv2.Sobel(image_with_mask, cv2.CV_16S, 0, 2)
     dy = cv2.convertScaleAbs(dy)
     cv2.normalize(dy, dy, 0, 255, cv2.NORM_MINMAX)
@@ -110,13 +115,16 @@ def correct(img_original):
     close = cv2.morphologyEx(close, cv2.MORPH_DILATE, None, iterations=2)
     closey = close.copy()
 
-    # 求x,y交点
+    # 求网格交点
+    # get the points of intersection
     res = cv2.bitwise_and(closex, closey)
     if DEBUG:
         plotCVImg.plotImg(res, "dots")
 
-    # 查找轮廓，求每个轮廓的质心centroids
-    img_dots = cv2.cvtColor(img_brightness_adjust, cv2.COLOR_GRAY2BGR)
+    # 查找轮廓，求每个轮廓的质心
+    # find the contours of the points, and get the centroids of the points of intersection
+    # it is the corner of every small grid.
+    img_dots = cv2.cvtColor(img_brightness_adjusted, cv2.COLOR_GRAY2BGR)
     binary, contour, hierarchy = cv2.findContours(res, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
     centroids = []
     for cnt in contour:
@@ -132,7 +140,9 @@ def correct(img_original):
     b = np.vstack([c2[i * 10:(i + 1) * 10][np.argsort(c2[i * 10:(i + 1) * 10, 0])] for i in range(10)])
     bm = b.reshape((10, 10, 2))
 
-    res2 = cv2.cvtColor(img_brightness_adjust, cv2.COLOR_GRAY2BGR)
+    # 使用透视变换，根据以上角点将每个方格矫正，最后拼接成校正后图像
+    # use perspective transforming to correct every small grid, and splice them together.
+    res2 = cv2.cvtColor(img_brightness_adjusted, cv2.COLOR_GRAY2BGR)
     output = np.zeros((450, 450, 3), np.uint8)
     for i, j in enumerate(b):
         ri = i // 10
@@ -151,6 +161,7 @@ def correct(img_original):
     return img_puzzle
 
 
+# another way to correct the puzzle image, still not perfect.
 def correct2(img_original):
 
     if DEBUG:
@@ -162,17 +173,17 @@ def correct2(img_original):
         plotCVImg.plotImg(img_gray, "gray")
 
     # median Blur
-    img_Blur = cv2.medianBlur(img_gray, 5)
+    img_blur = cv2.medianBlur(img_gray, 5)
     if DEBUG:
-        plotCVImg.plotImg(img_Blur, "median Blur")
+        plotCVImg.plotImg(img_blur, "median Blur")
 
     # Gaussian Blur
-    img_Blur = cv2.GaussianBlur(img_gray, (3, 3), 0)
+    img_blur = cv2.GaussianBlur(img_gray, (3, 3), 0)
     if DEBUG:
-        plotCVImg.plotImg(img_Blur, "GaussianBlur")
+        plotCVImg.plotImg(img_blur, "GaussianBlur")
 
     # adaptive threshold
-    img_thresh = cv2.adaptiveThreshold(img_Blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
+    img_thresh = cv2.adaptiveThreshold(img_blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
     if DEBUG:
         plotCVImg.plotImg(img_thresh, "adaptiveThreshold")
 
