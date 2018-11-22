@@ -45,7 +45,7 @@ for i in range(SUDOKU_SIZE):
 
 # 显示提取数字结果
 if DEBUG:
-    print("There are", len(indexes_numbers), "of numbers and the indexes are:")
+    print("There are", len(indexes_numbers), "numbers and the indexes of them are:")
     print(indexes_numbers)
     # 创建子图
     rows = len(indexes_numbers) // 5 + 1
