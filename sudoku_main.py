@@ -1,0 +1,109 @@
+# -*- coding: utf-8 -*-
+import cv2
+import numpy as np
+from matplotlib import pyplot as plt
+import knn_ocr
+import plotCVImg
+import sudoku_solver
+import correction
+import extractNumber
+
+# 是否查看中间过程
+DEBUG = 1
+# 标准方格大小
+GRID_WIDTH = 40
+GRID_HEIGHT = 40
+# 标准数字大小
+NUM_WIDTH = 20
+NUM_HEIGHT = 20
+# 数独尺寸
+SUDOKU_SIZE = 9
+
+
+# 存储题目的数组 shape=(9*9, 20*20)
+sudoku = np.zeros(shape=(9 * 9, NUM_WIDTH * NUM_HEIGHT))
+
+# 读取图片
+img_original = cv2.imread('./images/c3.png')
+if DEBUG:
+    plotCVImg.plotImg(img_original, "original")
+
+# 预处理及图像校正
+img_puzzle = correction.correct(img_original)
+if DEBUG:
+    plotCVImg.plotImg(img_puzzle, "pre-process")
+
+
+# 识别并记录序号
+indexes_numbers = []
+for i in range(SUDOKU_SIZE):
+    for j in range(SUDOKU_SIZE):
+        im_number = img_puzzle[i * GRID_HEIGHT:(i + 1) * GRID_HEIGHT][:, j * GRID_WIDTH:(j + 1) * GRID_WIDTH]
+        hasNumber, sudoku[i * 9 + j, :] = extractNumber.recognize_number(im_number, i, j)
+        if hasNumber:
+            indexes_numbers.append(i * 9 + j)
+
+# 显示提取数字结果
+if DEBUG:
+    print("图像中数字有：", len(indexes_numbers), "个，位置如下：")
+    print(indexes_numbers)
+    # 创建子图
+    rows = len(indexes_numbers) // 5 + 1
+    f, axarr = plt.subplots(rows, 5)
+    row = 0
+    for x in range(len(indexes_numbers)):
+        ind = indexes_numbers[x]
+
+        if (x % 5) == 0 and x != 0:
+            row = row + 1
+        axarr[row, x % 5].imshow(cv2.resize(sudoku[ind, :].reshape(NUM_WIDTH, NUM_HEIGHT),
+                                            (NUM_WIDTH * 5, NUM_HEIGHT * 5)), cmap=plt.gray())
+    for i in range(rows):
+        for j in range(5):
+            axarr[i, j].axis("off")
+    plt.show()
+
+test = np.zeros(shape=(len(indexes_numbers), NUM_WIDTH * NUM_HEIGHT))
+for num in range(len(indexes_numbers)):
+    test[num] = sudoku[indexes_numbers[num]]
+test = test.reshape(-1, NUM_WIDTH * NUM_HEIGHT).astype(np.float32)
+
+result = knn_ocr.knn_ocr_normal(test)
+
+sudoku_puzzle = np.zeros(SUDOKU_SIZE * SUDOKU_SIZE)
+for num in range(len(indexes_numbers)):
+    sudoku_puzzle[indexes_numbers[num]] = result[num]
+sudoku_puzzle = sudoku_puzzle.reshape((SUDOKU_SIZE, SUDOKU_SIZE)).astype(np.int32)
+print(sudoku_puzzle)
+
+for num in range(len(indexes_numbers)):
+    number_path1 = "number\\%s" % (str(num)) + '.png'
+    img_num = sudoku[indexes_numbers[num]].reshape(20, 20)
+    cv2.imwrite(number_path1, img_num)
+
+img_puzzle_white = img_puzzle.copy()
+img_puzzle_white = cv2.bitwise_not(img_puzzle_white)
+img_puzzle_recognize = cv2.cvtColor(img_puzzle_white, cv2.COLOR_GRAY2BGR)
+for i in range(9):
+    for j in range(9):
+        x = int(i * GRID_WIDTH + 10)
+        y = int(j * GRID_WIDTH + GRID_WIDTH - 8)
+        if sudoku_puzzle[j][i] > 0:
+            cv2.putText(img_puzzle_recognize, str(sudoku_puzzle[j][i]), (x, y), cv2.FONT_HERSHEY_SIMPLEX, 1,
+                        (0, 0, 255), 2)
+plotCVImg.plotImgs(img_puzzle_white, img_puzzle_recognize)
+
+sudoku_solved = sudoku_solver.solveSudoku(sudoku_puzzle)
+
+img_puzzle_solved = img_puzzle_recognize.copy()
+for i in range(9):
+    for j in range(9):
+        x = int(i * GRID_WIDTH + 10)
+        y = int(j * GRID_WIDTH + GRID_WIDTH - 8)
+        if sudoku_puzzle[j][i] == 0:
+            cv2.putText(img_puzzle_solved, str(sudoku_solved[j][i]), (x, y), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0),
+                        2)
+plotCVImg.plotImgs(img_puzzle_recognize, img_puzzle_solved)
+
+sudoku_solved = np.array(sudoku_solved)
+print(sudoku_solved)
