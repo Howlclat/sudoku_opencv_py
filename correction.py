@@ -133,10 +133,12 @@ def correct(img_original):
             (x, y) = int(mom['m10'] / mom['m00']), int(mom['m01'] / mom['m00'])
             cv2.circle(img_dots, (x, y), 4, (0, 255, 0), -1)
             centroids.append((x, y))
+    if DEBUG:
+        plotCVImg.plotImg(img_dots, "centroids")
+
     centroids = np.array(centroids, dtype=np.float32)
     c = centroids.reshape((100, 2))
     c2 = c[np.argsort(c[:, 1])]
-
     b = np.vstack([c2[i * 10:(i + 1) * 10][np.argsort(c2[i * 10:(i + 1) * 10, 0])] for i in range(10)])
     bm = b.reshape((10, 10, 2))
 
